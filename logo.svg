@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="70 55 410 420" role="img" aria-label="PetAssist paw prints">
+  <defs>
+    <linearGradient id="fur" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b9aca3"/>
+      <stop offset="1" stop-color="#8e8178"/>
+    </linearGradient>
+    <g id="paw" fill="url(#fur)" stroke="#121212" stroke-width="6" stroke-linejoin="round">
+      <path d="M -56 46 C -63 -2 -38 -52 0 -52 C 38 -52 63 -2 56 46 C 54 59 36 61 0 59 C -36 61 -54 59 -56 46 Z"/>
+      <ellipse cx="-72" cy="-66" rx="17" ry="29" transform="rotate(-30 -72 -66)"/>
+      <ellipse cx="-24" cy="-103" rx="20" ry="31" transform="rotate(-8 -24 -103)"/>
+      <ellipse cx="36" cy="-104" rx="20" ry="31" transform="rotate(8 36 -104)"/>
+      <ellipse cx="84" cy="-63" rx="17" ry="29" transform="rotate(30 84 -63)"/>
+    </g>
+  </defs>
+  <use href="#paw" transform="translate(365 205)"/>
+  <use href="#paw" transform="translate(188 415)"/>
+</svg>

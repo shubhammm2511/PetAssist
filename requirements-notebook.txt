@@ -1,0 +1,14 @@
+docling
+docling-core
+chromadb
+openai
+anthropic
+requests
+tiktoken
+rank_bm25
+python-dotenv
+pandas
+pillow
+python-dateutil
+jupyter
+streamlit

@@ -1,0 +1,10 @@
+# Packages the Streamlit app needs (used by Streamlit Community Cloud).
+# Everything the notebook needs is in requirements-notebook.txt.
+# On Streamlit Cloud choose Python 3.11 or 3.12 under Advanced settings.
+streamlit==1.67.0
+chromadb==1.5.9
+openai==3.49.0
+rank_bm25==0.2.2
+python-dotenv==1.2.4
+requests==2.34.2
+python-dateutil==4.0.0
