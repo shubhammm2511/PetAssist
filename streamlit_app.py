@@ -9,6 +9,7 @@ import re
 import shutil
 import sys
 import tempfile
+import traceback
 import uuid
 from pathlib import Path
 
@@ -31,23 +32,63 @@ except Exception:
 
 @st.cache_resource(show_spinner=False)
 def load_rag():
-    """Loads the search + answering code once. The Chroma data in ./knowledge_base is copied to a temp folder first,
-    so the app never needs to write into the project folder."""
+    """Loads the search + answering code once and fills its database.
+
+    The data comes from ONE file, knowledge_base.json.gz, which is loaded into memory (nothing is written to disk).
+    If that file is missing it falls back to the older ./knowledge_base folder.
+    """
     work = Path(tempfile.gettempdir()) / "petassist"
     work.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("PETCARE_DATA_DIR", str(work))
-    kb = ROOT / "knowledge_base"
-    if os.getenv("CHROMA_MODE", "local").lower() != "cloud" and kb.exists():
+    snapshot, folder = ROOT / "knowledge_base.json.gz", ROOT / "knowledge_base"
+    source = "none"
+    if os.getenv("CHROMA_MODE", "local").lower() == "cloud":
+        source = "Chroma Cloud"
+    elif snapshot.exists():
+        os.environ["CHROMA_PATH"] = str(work / "unused_store")   # the real data is held in memory, see below
+        source = "knowledge_base.json.gz"
+    elif folder.exists():
         store = work / "chroma"
-        kb_db, store_db = kb / "chroma.sqlite3", store / "chroma.sqlite3"
+        kb_db, store_db = folder / "chroma.sqlite3", store / "chroma.sqlite3"
         if not store_db.exists() or kb_db.stat().st_mtime > store_db.stat().st_mtime:
             shutil.rmtree(store, ignore_errors=True)
-            shutil.copytree(kb, store)
+            shutil.copytree(folder, store)
         os.environ["CHROMA_PATH"] = str(store)
+        source = "knowledge_base folder"
     sys.path.insert(0, str(ROOT / "server"))
     import leo_rag  # built from PetCare_RAG_POC.ipynb
 
+    if source == "knowledge_base.json.gz":
+        import array
+        import base64
+        import gzip
+        import json
+
+        import chromadb
+
+        with gzip.open(snapshot, "rt", encoding="utf-8") as f:
+            data = json.load(f)
+        leo_rag.chroma = chromadb.EphemeralClient()               # in-memory database
+        for name, c in data["collections"].items():
+            if not c["ids"]:
+                continue
+            col = leo_rag.get_collection(name.removeprefix("petcare_"))
+            for i in range(0, len(c["ids"]), 200):
+                vectors = []
+                for packed in c["embeddings"][i:i + 200]:
+                    a = array.array("f")
+                    a.frombytes(base64.b64decode(packed))
+                    vectors.append(a.tolist())
+                col.upsert(ids=c["ids"][i:i + 200], embeddings=vectors,
+                           documents=c["documents"][i:i + 200], metadatas=c["metadatas"][i:i + 200])
+    leo_rag.petassist_source = source
     return leo_rag
+
+
+def kb_counts():
+    """Number of searchable chunks per animal, as the running app sees them."""
+    rag = load_rag()
+    return {sp: rag.get_collection(sp).count() for sp in ("dog", "cat", "cow", "fish", "horse")}
 
 
 ANIMALS = [("Any animal", None), ("Dog", "dog"), ("Cat", "cat"), ("Fish", "fish"), ("Cow", "cow"), ("Horse", "horse")]
@@ -231,6 +272,13 @@ ss.setdefault("region", "Any region")
 
 st.markdown(CSS, unsafe_allow_html=True)
 
+try:
+    if sum(kb_counts().values()) == 0:
+        st.error("PetAssist's knowledge base is empty, so it cannot answer yet. Open **System check** in the sidebar for details. "
+                 "Make sure `knowledge_base.json.gz` is uploaded next to `streamlit_app.py`.")
+except Exception:
+    pass  # the System check panel shows the reason
+
 
 def active_chat():
     return next((c for c in ss.chats if c["id"] == ss.active), None)
@@ -274,6 +322,30 @@ with st.sidebar:
     st.selectbox("Animal", [a for a, _ in ANIMALS], key="animal")
     st.selectbox("Region", [r for r, _ in REGIONS], key="region")
 
+    with st.expander("System check"):
+        try:
+            rag = load_rag()
+            counts = kb_counts()
+            st.markdown(
+                f"**Knowledge base:** {sum(counts.values())} chunks from `{rag.petassist_source}`  \n"
+                + ", ".join(f"{k} {v}" for k, v in counts.items() if v) + "  \n"
+                f"**Voyage key:** {'set' if rag.VOYAGE_API_KEY else 'MISSING'}  \n"
+                f"**NVIDIA key:** {'set' if rag.LLM_API_KEY else 'MISSING'}  \n"
+                f"**Embedding model:** {rag.EMBED_MODEL}  \n"
+                f"**Chat model:** {rag.LLM_MODEL or 'MISSING'}"
+            )
+            if st.button("Run a test search", key="test_search"):
+                try:
+                    hits, best = rag.search_kb("How much water should a cat drink?", "cat")
+                    if hits:
+                        st.success(f"Test search found {len(hits)} chunks (best distance {best:.2f}).")
+                    else:
+                        st.error("Test search found nothing.")
+                except Exception as exc:  # shown on screen so a problem can be diagnosed without server logs
+                    st.error(f"Test search failed: {type(exc).__name__}: {str(exc)[:300]}")
+        except Exception as exc:
+            st.error(f"PetAssist could not start: {type(exc).__name__}: {str(exc)[:300]}")
+
 # ---------- main ----------
 chat = active_chat()
 pending = None
@@ -306,6 +378,7 @@ else:
             reply = {"role": "assistant", "text": res["answer"], "kind": res["kind"],
                      "sources": res["sources"], "images": res["images"]}
         except Exception:
+            traceback.print_exc()   # shows in the app's logs
             reply = {"role": "assistant", "kind": "error",
                      "text": "PetAssist couldn't answer just now. Please try again in a moment."}
         chat["messages"].append(reply)
